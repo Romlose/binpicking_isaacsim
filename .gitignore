@@ -1,0 +1,10 @@
+# Ignore everything at repo root
+/*
+
+# Un-ignore specific directories and all their contents
+!/extsUser/
+!/extsUser/**
+
+
+!/dimplom_franka_3d/
+!/dimplom_franka_3d/**
