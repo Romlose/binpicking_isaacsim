@@ -5,6 +5,6 @@
 !/extsUser/
 !/extsUser/**
 
-
+!/README.md
 !/dimplom_franka_3d/
 !/dimplom_franka_3d/**
