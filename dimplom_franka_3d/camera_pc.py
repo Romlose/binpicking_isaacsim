@@ -9,7 +9,7 @@ from isaacsim.core.utils.rotations import euler_angles_to_quat
 
 class DepthCameraPCL:
     """
-    Класс для создания камеры глубины по ОФИЦИАЛЬНОМУ API Isaac Sim (4.0+/5.x)
+    Класс для создания камеры глубины
     """
     def __init__(
         self,
@@ -46,7 +46,6 @@ class DepthCameraPCL:
         if not self._is_initialized:
             return np.array([])
         
-        # Официальный метод получения облака точек
         pcl_data = self._camera.get_pointcloud()
         
         if pcl_data is None or len(pcl_data) == 0:
@@ -55,12 +54,12 @@ class DepthCameraPCL:
         return pcl_data
 
     def get_world_pose(self):
-        """Возвращает позицию и ориентацию (кватернион) камеры в мире"""
+        """Возвращает позицию и ориентацию в кватернионах камеры в мире"""
         if self._is_initialized:
             return self._camera.get_world_pose()
         return self._position, self._orientation
 
-    def set_world_pose(self, position: np.ndarray = None, orientation: np.ndarray = None):
+    def set_world_pose(self, position: np.ndarray = None, orientation: np.ndarray = None) -> None:
         if position is not None:
             self._position = position
         if orientation is not None:
