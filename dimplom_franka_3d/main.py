@@ -136,7 +136,6 @@ sensor_warned = False
 
 while simulation_app.is_running(): 
     my_world.step(render=True)
-    step += 1
     debug_interface.clear_points()
     try:
         pcl_data = rgbd_camera.get_point_cloud_data()
@@ -147,15 +146,20 @@ while simulation_app.is_running():
             detector.ransac_open3d()
             
             filtered_pc = detector._filtered_point_cloud
-            if step % 10 == 0:
-                print(filtered_pc.shape[0])
-                
             if filtered_pc is not None and len(filtered_pc) > 0:
-                debug_interface.draw_points(points=filtered_pc.tolist(), colors=[[0, 1, 0, 1]] * len(filtered_pc), sizes=[2] * len(filtered_pc))
+                step = max(1, len(filtered_pc) // 5000)
+                p_carb = [carb.Float3(p[0], p[1], p[2]) for p in filtered_pc[::step]]
+                c_carb = [carb.ColorRgba(0, 1, 0, 1) for _ in p_carb]
+                s_carb = [2.0 for _ in p_carb]
+                debug_interface.draw_points(p_carb, c_carb, s_carb)
             
             targets = detector.cluster_and_detect()
             if len(targets) > 0:
-                centers = [t['position'].tolist() for t in targets]
-                debug_interface.draw_points(points=centers, colors=[[1, 0, 0, 1]] * len(centers), sizes=[15] * len(centers))
+                p_center = [carb.Float3(t['position'][0], t['position'][1], t['position'][2]) for t in targets]
+                c_center = [carb.ColorRgba(1, 0, 0, 1) for _ in targets]
+                s_center = [15.0 for _ in targets]
+                debug_interface.draw_points(p_center, c_center, s_center)
     except KeyError:
         pass
+
+simulation_app.close()
