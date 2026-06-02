@@ -136,6 +136,7 @@ sensor_warned = False
 
 while simulation_app.is_running(): 
     my_world.step(render=True)
+    step += 1
     debug_interface.clear_points()
     try:
         pcl_data = rgbd_camera.get_point_cloud_data()
@@ -146,6 +147,9 @@ while simulation_app.is_running():
             detector.ransac_open3d()
             
             filtered_pc = detector._filtered_point_cloud
+            if step % 10 == 0:
+                print(filtered_pc.shape[0])
+                
             if filtered_pc is not None and len(filtered_pc) > 0:
                 debug_interface.draw_points(points=filtered_pc.tolist(), colors=[[0, 1, 0, 1]] * len(filtered_pc), sizes=[2] * len(filtered_pc))
             
