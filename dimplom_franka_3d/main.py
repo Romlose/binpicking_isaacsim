@@ -24,13 +24,12 @@ from isaacsim.core.utils.rotations import euler_angles_to_quat, quat_to_euler_an
 from isaacsim.util.debug_draw import _debug_draw
 import omni.kit.viewport.utility as vp_utils
 
-from behavior_scripts import CylinderBehavior, FrankaController
-from camera_pc import DepthCameraPCL, FittingDetection
+# from behavior_scripts import CylinderBehavior, FrankaController
+from camera_pc import DepthCameraPCL #, FittingDetection
 from scene_config import create_table, create_source_container, create_placing_area
 
 my_world = World(stage_units_in_meters=1.0)
 my_world.scene.add_default_ground_plane()
-my_world.reset()
 
 # Получаем интерфейс для дебажнной отрисовки
 debug_interface = _debug_draw.acquire_debug_draw_interface()
@@ -68,17 +67,15 @@ print("Default Isaac Sim grid environment added.")
     # orientation=initial_orientation.tolist()
 # )
 
-cube = DynamicCylinder(prim_path="/World/Cube",
-                       position=spawn_point.tolist(),
-                       radius=0.2,
-                       height=0.3)
-
 # Создаем камеру
 rgbd_camera = DepthCameraPCL(
     resolution=(1000, 1000),
-    position=np.array([0.0, 0.0, 1.0]), 
-    orientation=euler_angles_to_quat(np.array([0.0, 180.0, 0.0]), degrees=True),
+    position=np.array([0.0, 0.0, 2.5]), 
+    orientation=euler_angles_to_quat(np.array([0.0, 90.0, 0.0]), degrees=True),
 )
+
+my_world.reset()
+
 # После world reset судя по документации метода
 rgbd_camera.initialize()
 
@@ -89,14 +86,29 @@ CONTAINER_CONSTRAINTS = [
     [0.42, 0.6]   
 ]
 
+for _ in range(20):
+    my_world.step(render=True)
+
 if args.debug_mode:
-    new_viewport_camera_window = vp_utils.create_viewport_window(
+    global depth_viewport_window
+    depth_viewport_window = vp_utils.create_viewport_window(
         name="DepthCameraView",
         camera_path="/World/DepthCamera"
     )
+    simulation_app.update()
+    main_viewport = vp_utils.get_active_viewport()
+    if main_viewport:
+        main_viewport.camera = "/OmniverseKit_Persp" 
     
+    stage = omni.usd.get_context().get_stage()
+    cam_prim = stage.GetPrimAtPath("/World/DepthCamera")
+    if cam_prim.IsValid():
+        usd_cam = UsdGeom.Camera(cam_prim)
+        usd_cam.GetProjectionAttr().Set("perspective")
+
     settings = carb.settings.get_settings()
-    settings.set("/app/viewport/displayOptions/cameraFrustum", "always") 
+    settings.set("/app/viewport/displayOptions/cameraFrustum", "always")
+
 
 step = 0
 sensor_initialized = False
@@ -104,7 +116,9 @@ sensor_warned = False
 
 while simulation_app.is_running(): 
     my_world.step(render=True)
-    rgbd_camera.get_point_cloud_data()
-
+    try:
+        rgbd_camera.get_point_cloud_data()
+    except KeyError:
+        pass
 
 simulation_app.close()
