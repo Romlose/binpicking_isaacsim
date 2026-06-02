@@ -24,8 +24,8 @@ from isaacsim.core.utils.rotations import euler_angles_to_quat, quat_to_euler_an
 from isaacsim.util.debug_draw import _debug_draw
 import omni.kit.viewport.utility as vp_utils
 
-# from behavior_scripts import CylinderBehavior, FrankaController
-from camera_pc import DepthCameraPCL #, FittingDetection
+from behavior_scripts import CylinderBehavior, FrankaController
+from camera_pc import DepthCameraPCL, FittingDetection
 from scene_config import create_table, create_source_container, create_placing_area
 
 my_world = World(stage_units_in_meters=1.0)
@@ -65,12 +65,33 @@ print("Default Isaac Sim grid environment added.")
     # number_cylinders=10,
     # position=spawn_point.tolist(),
     # orientation=initial_orientation.tolist()
-# )
+CYL_RADIUS = 0.025
+CYL_HEIGHT = 0.08
+CYL_COLOR = np.array([0.1, 0.2, 0.9])
+
+lay_flat_orientation = euler_angles_to_quat(np.array([90.0, 0.0, 0.0]), degrees=True)
+
+z_pos = spawn_point[2] + CYL_RADIUS
+
+DynamicCylinder(prim_path="/World/Cyl_1", 
+                position=[spawn_point[0], spawn_point[1], z_pos], 
+                orientation=lay_flat_orientation,
+                radius=CYL_RADIUS, height=CYL_HEIGHT, color=CYL_COLOR)
+
+DynamicCylinder(prim_path="/World/Cyl_2", 
+                position=[spawn_point[0] - 0.05, spawn_point[1] + 0.02, z_pos], 
+                orientation=lay_flat_orientation,
+                radius=CYL_RADIUS, height=CYL_HEIGHT, color=CYL_COLOR)
+
+DynamicCylinder(prim_path="/World/Cyl_3", 
+                position=[spawn_point[0] + 0.04, spawn_point[1] - 0.03, z_pos + 0.01], 
+                orientation=lay_flat_orientation,
+                radius=CYL_RADIUS, height=CYL_HEIGHT, color=CYL_COLOR)
 
 # Создаем камеру
 rgbd_camera = DepthCameraPCL(
     resolution=(1000, 1000),
-    position=np.array([0.0, 0.0, 2.5]), 
+    position=np.array([0.35, 0.3, 2.5]), 
     orientation=euler_angles_to_quat(np.array([0.0, 90.0, 0.0]), degrees=True),
 )
 
@@ -78,13 +99,6 @@ my_world.reset()
 
 # После world reset судя по документации метода
 rgbd_camera.initialize()
-
-# Границы контейнера
-CONTAINER_CONSTRAINTS = [
-    [0.2, 0.5],   
-    [0.15, 0.45], 
-    [0.42, 0.6]   
-]
 
 for _ in range(20):
     my_world.step(render=True)
@@ -110,15 +124,34 @@ if args.debug_mode:
     settings.set("/app/viewport/displayOptions/cameraFrustum", "always")
 
 
+CONTAINER_CONSTRAINTS = [
+    [0.17, 0.53],   
+    [0.16, 0.44], 
+    [0.38, 0.55]   
+]
+
 step = 0
 sensor_initialized = False
 sensor_warned = False
 
 while simulation_app.is_running(): 
     my_world.step(render=True)
+    debug_interface.clear_points()
     try:
-        rgbd_camera.get_point_cloud_data()
+        pcl_data = rgbd_camera.get_point_cloud_data()
+        if len(pcl_data) > 0:
+            detector = FittingDetection(pcl_data, CONTAINER_CONSTRAINTS)
+            detector.extract_container_pc()
+            detector.voxelize_pc()
+            detector.ransac_open3d()
+            
+            filtered_pc = detector._filtered_point_cloud
+            if filtered_pc is not None and len(filtered_pc) > 0:
+                debug_interface.draw_points(points=filtered_pc.tolist(), colors=[[0, 1, 0, 1]] * len(filtered_pc), sizes=[2] * len(filtered_pc))
+            
+            targets = detector.cluster_and_detect()
+            if len(targets) > 0:
+                centers = [t['position'].tolist() for t in targets]
+                debug_interface.draw_points(points=centers, colors=[[1, 0, 0, 1]] * len(centers), sizes=[15] * len(centers))
     except KeyError:
         pass
-
-simulation_app.close()

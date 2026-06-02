@@ -1,6 +1,7 @@
 import numpy as np
 import omni.usd
 from pxr.UsdGeom import Cube, Cylinder
+from isaacsim.core.api.objects import FixedCuboid
 from isaacsim.core.prims import SingleGeometryPrim
 from isaacsim.core.api.materials import PhysicsMaterial, OmniPBR
 from omni.isaac.core.utils.stage import add_reference_to_stage
@@ -9,7 +10,7 @@ import isaacsim.core.utils.stage as stage_utils
 from omni.isaac.core.prims import GeometryPrim
 
 
-# --- ИНИЦИАЛИЗАЦИЯ МАТЕРИАЛОВ ---
+
 table_physics = PhysicsMaterial(prim_path="/World/physics_materials/table", static_friction=0.8, dynamic_friction=0.7, restitution=0.1)
 table_visual = OmniPBR(prim_path="/World/material/table_visual", color=np.array([0.7, 0.5, 0.3]))
 
@@ -17,31 +18,26 @@ tray_physics = PhysicsMaterial(prim_path="/World/physics_materials/tray", static
 tray_visual = OmniPBR(prim_path="/World/material/tray_visual", color=np.array([0.4, 0.4, 0.45]))
 
 
-# --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ---
+
 def create_box(prim_path: str, name: str, position: np.ndarray, size: np.ndarray, physics_mat: PhysicsMaterial, visual_mat: OmniPBR, collision: bool = True):
-    """Правильное создание параллелепипеда через USD API и SingleGeometryPrim"""
+
     stage = omni.usd.get_context().get_stage()
     
-    # 1. Создаем геометрию на сцене (по умолчанию размером 1x1x1 метр)
     Cube.Define(stage, prim_path)
     
-    # 2. Оборачиваем в Isaac Sim Prim. Передаем позицию и scale (который растянет куб до нужного size)
     box_prim = SingleGeometryPrim(
         prim_path=prim_path, 
         name=name, 
         position=position, 
         scale=size,
-        collision=collision # Включаем коллизию прямо при инициализации
+        collision=collision 
     )
     
-    # 3. Применяем материалы
     box_prim.apply_physics_material(physics_mat)
     box_prim.apply_visual_material(visual_mat)
     
     return box_prim
 
-
-# --- ФУНКЦИИ СОЗДАНИЯ СЦЕНЫ ---
 
 def create_table(position=np.array([0.0, 0.0, 0.4]), size=np.array([0.8, 0.8, 0.04])) -> float:
     """Создает стол и возвращает Z-координату его поверхности"""
@@ -51,29 +47,32 @@ def create_table(position=np.array([0.0, 0.0, 0.4]), size=np.array([0.8, 0.8, 0.
 
 
 def create_source_container(table_z: float, offset_x=0.35, offset_y=0.3) -> np.ndarray:
-    """Загружает готовую коробку используя правильный корневой путь облака Isaac Sim 5.1.0"""
     source_pos = np.array([offset_x, offset_y, table_z])
     prim_path = "/World/SourceContainer"
     
-    # Получаем правильный системный префикс облака/сервера
-    assets_root = get_assets_root_path()
-    if assets_root is None:
-        raise RuntimeError("Не удалось подключиться к серверу ассетов NVIDIA.")
+    BIN_W, BIN_D, BIN_H = 0.36, 0.28, 0.10
+    WALL_T = 0.008
+    FLOOR_T = 0.02
+    HALF_W, HALF_D = BIN_W/2, BIN_D/2
+    
+    MTUCI_PURPLE    = np.array([0.42, 0.10, 0.58])
+    MTUCI_PURPLE_LT = np.array([0.50, 0.18, 0.65])
+    
+    FixedCuboid(prim_path=f"{prim_path}/bottom", name="bin_bottom",
+        position=np.array([offset_x, offset_y, table_z + FLOOR_T/2]),
+        scale=np.array([BIN_W, BIN_D, FLOOR_T]), color=MTUCI_PURPLE)
+    
+    for wn, dx, dy, sx, sy in [
+        ("wall_front", 0, -(HALF_D-WALL_T/2), BIN_W, WALL_T),
+        ("wall_back",  0,  (HALF_D-WALL_T/2), BIN_W, WALL_T),
+        ("wall_left", -(HALF_W-WALL_T/2), 0, WALL_T, BIN_D),
+        ("wall_right", (HALF_W-WALL_T/2), 0, WALL_T, BIN_D),
+    ]:
+        FixedCuboid(prim_path=f"{prim_path}/{wn}", name=f"bin_{wn}",
+            position=np.array([offset_x+dx, offset_y+dy, table_z + FLOOR_T + BIN_H/2]),
+            scale=np.array([sx, sy, BIN_H]), color=MTUCI_PURPLE_LT)
         
-    # Формируем корректный путь к контейнеру
-    usd_asset_path = assets_root + "/Isaac/Props/Containers/industrial_bin.usd"
-    
-    # 1. Добавляем референс на стейдж
-    stage_utils.add_reference_to_stage(usd_path=usd_asset_path, prim_path=prim_path)
-    
-    # 2. Инициализируем объект для позиционирования
-    container = GeometryPrim(prim_path=prim_path, name="src_container")
-    container.set_world_pose(position=source_pos)
-    
-    # Высота контейнера для расчета точки спавна
-    container_height = 0.10 
-    
-    return source_pos + np.array([0, 0, container_height + 0.01])
+    return source_pos + np.array([0, 0, FLOOR_T + 0.01])
 
 
 def create_placing_area(table_top_z: float, offset_x=0.35, offset_y=-0.3) -> list:

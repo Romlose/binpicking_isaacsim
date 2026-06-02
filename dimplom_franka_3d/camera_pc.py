@@ -70,10 +70,17 @@ class DepthCameraPCL:
 
 class FittingDetection:
     def __init__(self, point_cloud: np.ndarray, coord_constraints: list[list]):
-        self._point_cloud_raw = point_cloud
+        if hasattr(point_cloud, 'numpy'):
+            point_cloud = point_cloud.numpy()
+            
+        self._point_cloud_raw = np.asarray(point_cloud, dtype=np.float32)
+        
+        if len(self._point_cloud_raw.shape) == 1 and self._point_cloud_raw.size > 0:
+            self._point_cloud_raw = self._point_cloud_raw.reshape(-1, 3)
+            
         self._coord_constraints = coord_constraints
         self._filtered_point_cloud = None
-    
+        
     def extract_container_pc(self, coord_constraints: list[list] = None) -> np.ndarray:
         if coord_constraints is not None:
             self._coord_constraints = coord_constraints
