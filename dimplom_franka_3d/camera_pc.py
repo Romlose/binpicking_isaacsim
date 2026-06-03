@@ -28,7 +28,7 @@ class DepthCameraPCL:
             resolution=self._resolution,
             position=self._position,
             orientation=self._orientation,
-            frequency=20,
+            frequency=60,
             annotator_device = "cuda:0"
         )
         self._is_initialized = False

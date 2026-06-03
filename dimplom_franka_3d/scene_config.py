@@ -39,7 +39,7 @@ def create_box(prim_path: str, name: str, position: np.ndarray, size: np.ndarray
     return box_prim
 
 
-def create_table(position=np.array([0.0, 0.0, 0.4]), size=np.array([0.8, 0.8, 0.04])) -> float:
+def create_table(position=np.array([0.2, 0.0, 0.4]), size=np.array([0.4, 0.8, 0.04])) -> float:
     """Создает стол и возвращает Z-координату его поверхности"""
     create_box("/World/Table", "table", position, size, table_physics, table_visual)
     table_top_z = position[2] + size[2] / 2
