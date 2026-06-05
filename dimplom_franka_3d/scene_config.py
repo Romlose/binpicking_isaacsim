@@ -50,7 +50,7 @@ def create_source_container(table_z: float, offset_x=0.35, offset_y=0.3) -> np.n
     source_pos = np.array([offset_x, offset_y, table_z])
     prim_path = "/World/SourceContainer"
     
-    BIN_W, BIN_D, BIN_H = 0.36, 0.28, 0.10
+    BIN_W, BIN_D, BIN_H = 0.25, 0.18, 0.10
     WALL_T = 0.008
     FLOOR_T = 0.02
     HALF_W, HALF_D = BIN_W/2, BIN_D/2

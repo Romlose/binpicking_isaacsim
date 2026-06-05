@@ -99,7 +99,7 @@ class FittingDetection:
         self._filtered_point_cloud = self._point_cloud_raw[mask]
         return self._filtered_point_cloud
 
-    def voxelize_pc(self, voxel_size: float = 0.005) -> np.ndarray:
+    def voxelize_pc(self, voxel_size: float = 0.001) -> np.ndarray:
         if self._filtered_point_cloud is None or len(self._filtered_point_cloud) == 0:
             return np.array([])
 
@@ -110,21 +110,36 @@ class FittingDetection:
         self._filtered_point_cloud = np.asarray(downsampled_pcd.points)
         return self._filtered_point_cloud
 
-    def ransac_open3d(self, distance_threshold: float = 0.005, num_iterations: int = 1000) -> np.ndarray:
-        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) == 0:
-            return np.array([])
-        
+    def remove_container_planes_iterative(self, distance_threshold: float = 0.004, min_plane_ratio: float = 0.05, max_iterations: int = 1000) -> np.ndarray:
+        """
+        Итеративно находит и удаляет плоские поверхности (пол и стенки контейнера).
+        Останавливается, когда самая большая оставшаяся плоскость составляет меньше min_plane_ratio от облака.
+        """
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) < 100:
+            return self._filtered_point_cloud
+
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(self._filtered_point_cloud)
         
-        plane_model, inliers = pcd.segment_plane(
-            distance_threshold=distance_threshold, 
-            ransac_n=3, 
-            num_iterations=num_iterations
-        )
+        planes_removed = 0
         
-        outlier_pcd = pcd.select_by_index(inliers, invert=True)
-        self._filtered_point_cloud = np.asarray(outlier_pcd.points)
+        for _ in range(5):
+            if len(pcd.points) < 100:
+                break
+                
+            plane_model, inliers = pcd.segment_plane(
+                distance_threshold=distance_threshold, 
+                ransac_n=3, 
+                num_iterations=max_iterations
+            )
+            
+            if len(inliers) / len(pcd.points) < min_plane_ratio:
+                break
+                
+            pcd = pcd.select_by_index(inliers, invert=True)
+            planes_removed += 1
+
+        self._filtered_point_cloud = np.asarray(pcd.points)
         return self._filtered_point_cloud
 
     def cluster_and_detect(self, eps: float = 0.02, min_points: int = 10) -> list[dict]:
@@ -180,4 +195,140 @@ class FittingDetection:
         fitting_targets.sort(key=lambda x: x['num_points'], reverse=True)
 
         return fitting_targets
+    
+    def get_highest_point_grasp(self):
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) == 0:
+            return None
+            
+        highest_idx = np.argmax(self._filtered_point_cloud[:, 2])
+        position = self._filtered_point_cloud[highest_idx]
         
+        return {
+            'position': position,
+            'approach': np.array([0.0, 0.0, -1.0])
+        }
+
+    def get_top_cluster_grasp(self, eps=0.02, min_points=10):
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) < min_points:
+            return None
+            
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self._filtered_point_cloud)
+        labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points))
+        
+        if labels.max() < 0:
+            return None
+            
+        max_z = -np.inf
+        top_cluster_pts = None
+        
+        for cid in range(labels.max() + 1):
+            idx = np.where(labels == cid)[0]
+            pts = self._filtered_point_cloud[idx]
+            cz = np.max(pts[:, 2])
+            
+            if cz > max_z:
+                max_z = cz
+                top_cluster_pts = pts
+                
+        if top_cluster_pts is None or len(top_cluster_pts) < 3:
+            return None
+            
+        pca = PCA(n_components=3)
+        pca.fit(top_cluster_pts)
+        
+        return {
+            'position': pca.mean_,
+            'cylinder_axis': pca.components_[0],
+            'approach': np.array([0.0, 0.0, -1.0])
+        }
+        
+    def get_centroid_clusters_grasp(self, eps: float = 0.015, min_points: int = 30) -> list[dict]:
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) < min_points:
+            return []
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self._filtered_point_cloud)
+        labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points))
+        
+        if len(labels) == 0 or labels.max() < 0:
+            return []
+
+        targets = []
+        for cid in range(labels.max() + 1):
+            idx = np.where(labels == cid)[0]
+            pts = self._filtered_point_cloud[idx]
+
+            if len(pts) < min_points:
+                continue
+
+            min_bound = np.min(pts, axis=0)
+            max_bound = np.max(pts, axis=0)
+            extent = max_bound - min_bound
+            
+            if np.max(extent) > 0.10:
+                continue
+
+            centroid = np.mean(pts, axis=0)
+            max_z_in_cluster = np.max(pts[:, 2])
+            grasp_z = max_z_in_cluster - 0.03
+
+            targets.append({
+                'position': np.array([centroid[0], centroid[1], grasp_z]),
+                'approach': np.array([0.0, 0.0, -1.0]),
+                'num_points': len(pts),
+                'cluster_points': pts
+            })
+
+        targets.sort(key=lambda x: x['num_points'], reverse=True)
+        return targets
+    
+    def ransac_remove_horizontal_planes(self, distance_threshold: float = 0.005, num_iterations: int = 1000, min_plane_ratio: float = 0.03, z_normal_threshold: float = 0.95) -> np.ndarray:
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) == 0:
+            return np.array([])
+            
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self._filtered_point_cloud)
+        
+        while True:
+            if len(pcd.points) < 100:
+                break
+                
+            plane_model, inliers = pcd.segment_plane(
+                distance_threshold=distance_threshold, 
+                ransac_n=3, 
+                num_iterations=num_iterations
+            )
+            
+            if len(inliers) / len(pcd.points) < min_plane_ratio:
+                break
+                
+            pcd = pcd.select_by_index(inliers, invert=True)
+        
+        self._filtered_point_cloud = np.asarray(pcd.points)
+        return self._filtered_point_cloud
+    
+    def remove_noise_and_edges(self, nb_neighbors=20, std_ratio=1.5):
+        """
+        Удаляет статистические выбросы (шум, края стенок, одинокие точки).
+        Оставляет только плотные кластеры (наши цилиндры).
+        """
+        if self._filtered_point_cloud is None or len(self._filtered_point_cloud) < nb_neighbors:
+            return self._filtered_point_cloud
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self._filtered_point_cloud)
+        
+        # nb_neighbors: сколько соседей рассматривать для каждой точки
+        # std_ratio: насколько точка может отклоняться от среднего расстояния до соседей. 
+        # Чем меньше, тем агрессивнее удаление. 1.5 - хороший баланс.
+        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+        
+        if len(ind) == 0:
+            self._filtered_point_cloud = np.array([])
+        else:
+            clean_pcd = pcd.select_by_index(ind)
+            self._filtered_point_cloud = np.asarray(clean_pcd.points)
+            
+        print(f"[Noise Removal] Точек после фильтрации плотности: {len(self._filtered_point_cloud)}")
+        return self._filtered_point_cloud
