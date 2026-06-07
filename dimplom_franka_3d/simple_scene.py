@@ -1,48 +1,65 @@
-import sys
-from omni.isaac.kit import SimulationApp
-
-# 1. Запуск симуляционного приложения (обязательно до импорта других модулей Isaac)
-# False означает, что симуляция запускается с графическим интерфейсом (GUI)
+from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
 
-import omni.isaac.core.utils.stage as stage_utils
-from omni.isaac.core import SimulationContext
-from omni.isaac.core.utils.nucleus import get_assets_root_path
+import numpy as np
+from isaacsim.core.api import World
+from isaacsim.robot.manipulators.examples.franka import Franka
+from isaacsim.robot.manipulators.examples.franka.controllers.pick_place_controller import PickPlaceController
 
-def main():
-    # 2. Получаем базовый URL-путь к облачным ассетам на AWS S3 (Omniverse Nucleus)
-    assets_root_path = get_assets_root_path()
-    if assets_root_path is None:
-        print("Ошибка: Не удалось получить путь к облачным ассетам NVIDIA AWS!")
-        simulation_app.close()
-        return
+print("[INIT] Создание мира...")
+my_world = World(stage_units_in_meters=1.0)
+my_world.scene.add_default_ground_plane()
 
-    print(f"Успешное подключение к серверу ассетов. Базовый путь: {assets_root_path}")
+print("[INIT] Создание Франки с безопасным раскрытием схвата...")
+franka = Franka(
+    prim_path="/World/Franka", 
+    name="franka_robot",
+    position=np.array([0.0, 0.0, 0.0]),
+    orientation=np.array([1.0, 0.0, 0.0, 0.0]),
+    gripper_open_position=np.array([0.025, 0.025]), # 2.5 см на палец
+    deltas=np.array([0.025, 0.025])
+)
+my_world.scene.add(franka)
 
-    # 3. Путь к готовой сцене склада на сервере
-    # В Isaac Sim 5.1.0 стандартный склад находится по этому пути:
-    warehouse_usd_path = "https://amazonaws.com"
+print("[INIT] Сброс мира...")
+my_world.reset()
 
-    print(f"Загрузка сцены склада из AWS S3: {warehouse_usd_path}")
-    print("Внимание: Первая загрузка может занять несколько минут, так как файлы скачиваются из облака...")
+print("[INIT] Инициализация робота...")
+franka.initialize()
 
-    # 4. Открываем (заменяем текущую сцену) или добавляем склад как под-сцену (Reference)
-    # В данном случае мы полностью открываем файл сцены склада
-    stage_utils.open_stage(usd_path=warehouse_usd_path)
+# Больше никаких хаков с ограничением физики суставов! Всё решено через API
 
-    # 5. Инициализируем контекст симуляции для управления физикой и временем
-    sim_context = SimulationContext(stage_units_in_meters=True)
-    sim_context.initialize_physics()
+print("[INIT] Создание контроллера Франки...")
+pick_place_controller = PickPlaceController(
+    name="pick_place_controller",
+    gripper=franka.gripper,
+    robot_articulation=franka,
+    end_effector_initial_height=0.3, 
+)
 
-    print("Склад успешно загружен! Симуляция запущена.")
+# Тестовые точки (впереди робота, на высоте 10 см над столом)
+picking_position = np.array([0.5, 0.3, 0.1])  
+placing_position = np.array([0.5, -0.3, 0.1]) 
 
-    # 6. Основной цикл симуляции (держит окно открытым и обновляет кадры)
-    while simulation_app.is_running():
-        # Шаг симуляции (физика + рендеринг)
-        sim_context.step(render=True)
+print("[INIT] Готово! Франка двигается и использует безопасное открытие схвата.")
 
-    # 7. Корректное закрытие приложения при выходе
-    simulation_app.close()
+cycle_count = 0
 
-if __name__ == "__main__":
-    main()
+while simulation_app.is_running():
+    my_world.step(render=True)
+    
+    joint_positions = franka.get_joint_positions()
+    
+    if pick_place_controller.is_done():
+        cycle_count += 1
+        print(f"\n[TEST] Цикл {cycle_count} завершен! Сброс...\n")
+        pick_place_controller.reset()
+    
+    action = pick_place_controller.forward(
+        picking_position=picking_position,
+        placing_position=placing_position,
+        current_joint_positions=joint_positions
+    )
+    franka.get_articulation_controller().apply_action(action)
+
+simulation_app.close()

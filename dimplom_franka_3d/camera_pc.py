@@ -269,13 +269,42 @@ class FittingDetection:
             if np.max(extent) > 0.10:
                 continue
 
+            # --- НАДЕЖНОЕ ВЫЧИСЛЕНИЕ ОРИЕНТАЦИИ ---
+            pca = PCA(n_components=3)
+            pca.fit(pts)
+            cylinder_axis = pca.components_[0]
+            
+            # ФИКСИРУЕМ ЗНАК ОСИ! 
+            # Гарантируем, что вектор всегда смотрит в одну сторону полупространства (X > 0)
+            # Это убирает скачки ориентации на 180 градусов
+            if cylinder_axis[0] < 0:
+                cylinder_axis = -cylinder_axis
+            elif cylinder_axis[0] == 0 and cylinder_axis[1] < 0:
+                cylinder_axis = -cylinder_axis
+            
+            axis_xy = np.array([cylinder_axis[0], cylinder_axis[1]])
+            
+            if np.linalg.norm(axis_xy) > 1e-6:
+                # Угол оси цилиндра
+                alpha = np.arctan2(axis_xy[1], axis_xy[0])
+                # Схват перпендикулярен оси (+ 90 градусов)
+                yaw_angle = alpha + np.pi/2
+            else:
+                # Цилиндр стоит вертикально, вращение не критично
+                yaw_angle = 0.0
+                
+            # ИСПОЛЬЗУЕМ ВСТРОЕННУЮ ФУНКЦИЮ EULER -> QUAT (Она гораздо стабильнее!)
+            # X=0, Y=pi (смотрит вниз), Z=yaw_angle (поворот вокруг своей оси)
+            # Убедись, что euler_angles_to_quat импортирована в camera_pc.py!
+            from isaacsim.core.utils.rotations import euler_angles_to_quat
+            target_orientation = euler_angles_to_quat(np.array([0, np.pi, yaw_angle]), degrees=False)
+            # ----------------------------------------
+
             centroid = np.mean(pts, axis=0)
-            max_z_in_cluster = np.max(pts[:, 2])
-            grasp_z = max_z_in_cluster - 0.03
 
             targets.append({
-                'position': np.array([centroid[0], centroid[1], grasp_z]),
-                'approach': np.array([0.0, 0.0, -1.0]),
+                'position': centroid,
+                'orientation': target_orientation,
                 'num_points': len(pts),
                 'cluster_points': pts
             })
